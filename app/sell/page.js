@@ -8,15 +8,17 @@ export default function SellPage() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // สินค้าที่เลือกและจำนวนที่จะขาย
+  // ตะกร้าสินค้า: [{ productId, sku, name, price, unit, quantity, stock }]
+  const [cart, setCart] = useState([]);
+
+  // ฟอร์มสำหรับเพิ่มสินค้าลงตะกร้า
   const [selectedProductId, setSelectedProductId] = useState('');
-  const [quantity, setQuantity] = useState('');
+  const [addQuantity, setAddQuantity] = useState('');
 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [selling, setSelling] = useState(false);
+  const [checkingOut, setCheckingOut] = useState(false);
 
-  // โหลดสินค้าตอนเปิดหน้า
   useEffect(() => {
     fetchProducts();
   }, []);
@@ -37,114 +39,203 @@ export default function SellPage() {
     setLoading(false);
   }
 
-  // หาข้อมูลสินค้าที่กำลังเลือกอยู่ (ใช้คำนวณยอดรวม)
-  const selectedProduct = products.find((p) => p.id === selectedProductId);
+  // ยอดรวมทั้งตะกร้า
+  const cartTotal = cart.reduce(
+    (sum, item) => sum + item.price * item.quantity,
+    0
+  );
 
-  // คำนวณยอดรวม = ราคา x จำนวน
-  const quantityNumber = parseInt(quantity, 10) || 0;
-  const totalPrice = selectedProduct
-    ? selectedProduct.price * quantityNumber
-    : 0;
-
-  function resetForm() {
-    setSelectedProductId('');
-    setQuantity('');
-  }
-
-  async function handleSell(e) {
+  // เพิ่มสินค้าที่เลือกลงตะกร้า
+  function handleAddToCart(e) {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
-    // ตรวจสอบข้อมูลเบื้องต้น
-    if (!selectedProductId) {
+    const product = products.find((p) => p.id === selectedProductId);
+    const qty = parseInt(addQuantity, 10);
+
+    if (!product) {
       setErrorMsg('กรุณาเลือกสินค้า');
       return;
     }
-    if (!quantity || quantityNumber <= 0) {
+    if (!qty || qty <= 0) {
       setErrorMsg('กรุณากรอกจำนวนที่ถูกต้อง');
       return;
     }
 
-    setSelling(true);
+    // จำนวนที่มีอยู่แล้วในตะกร้าของสินค้าตัวนี้ (ถ้ามี)
+    const existingItem = cart.find((item) => item.productId === product.id);
+    const alreadyInCart = existingItem ? existingItem.quantity : 0;
 
-    // ดึงข้อมูล stock ล่าสุดของสินค้าตัวนี้อีกครั้ง เพื่อความชัวร์ว่า stock ไม่เปลี่ยนไปจากที่แสดงบนหน้าจอ
-    const { data: latestProduct, error: fetchError } = await supabase
-      .from('products')
-      .select('*')
-      .eq('id', selectedProductId)
-      .single();
-
-    if (fetchError || !latestProduct) {
-      setErrorMsg('ไม่พบข้อมูลสินค้า กรุณาลองใหม่');
-      setSelling(false);
-      return;
-    }
-
-    // ตรวจสอบว่า stock เพียงพอหรือไม่
-    if (latestProduct.stock < quantityNumber) {
+    // ตรวจสอบ stock รวม (ของเดิมในตะกร้า + ที่จะเพิ่ม) ไม่เกินคงเหลือ
+    if (alreadyInCart + qty > product.stock) {
       setErrorMsg(
-        `สินค้าคงเหลือไม่พอ (คงเหลือ ${latestProduct.stock} ${latestProduct.unit})`
+        `สินค้า "${product.name}" คงเหลือ ${product.stock} ${product.unit} (ในตะกร้ามีแล้ว ${alreadyInCart})`
       );
-      setSelling(false);
       return;
     }
 
-    const total = latestProduct.price * quantityNumber;
-
-    // บันทึกรายการขายลงตาราง sales
-    const { error: saleError } = await supabase.from('sales').insert([
-      {
-        product_id: latestProduct.id,
-        product_name: latestProduct.name,
-        quantity: quantityNumber,
-        total_price: total,
-        sold_at: new Date().toISOString(),
-      },
-    ]);
-
-    if (saleError) {
-      setErrorMsg('บันทึกการขายไม่สำเร็จ: ' + saleError.message);
-      setSelling(false);
-      return;
+    if (existingItem) {
+      // ถ้ามีสินค้านี้ในตะกร้าแล้ว ให้บวกจำนวนเพิ่ม
+      setCart((prev) =>
+        prev.map((item) =>
+          item.productId === product.id
+            ? { ...item, quantity: item.quantity + qty }
+            : item
+        )
+      );
+    } else {
+      // เพิ่มเป็นรายการใหม่ในตะกร้า
+      setCart((prev) => [
+        ...prev,
+        {
+          productId: product.id,
+          sku: product.sku,
+          name: product.name,
+          price: product.price,
+          unit: product.unit,
+          quantity: qty,
+          stock: product.stock,
+        },
+      ]);
     }
 
-    // อัปเดต stock ในตาราง products ให้ลดลงตามจำนวนที่ขาย
-    const newStock = latestProduct.stock - quantityNumber;
-    const { error: updateError } = await supabase
-      .from('products')
-      .update({ stock: newStock })
-      .eq('id', latestProduct.id);
+    // รีเซ็ตฟอร์มเพิ่มสินค้า
+    setSelectedProductId('');
+    setAddQuantity('');
+  }
 
-    if (updateError) {
-      setErrorMsg('อัปเดตสต็อกไม่สำเร็จ: ' + updateError.message);
-      setSelling(false);
-      return;
-    }
+  // ลบรายการออกจากตะกร้า
+  function handleRemoveFromCart(productId) {
+    setCart((prev) => prev.filter((item) => item.productId !== productId));
+  }
 
-    // สำเร็จ: แจ้งเตือนและรีเซ็ตฟอร์ม
-    setSuccessMsg(
-      `ขาย ${latestProduct.name} จำนวน ${quantityNumber} ${latestProduct.unit} สำเร็จ (รวม ${total.toFixed(2)} บาท)`
+  // แก้จำนวนของรายการในตะกร้าโดยตรง
+  function handleChangeCartQuantity(productId, newQty) {
+    const qty = parseInt(newQty, 10);
+    setCart((prev) =>
+      prev.map((item) =>
+        item.productId === productId
+          ? { ...item, quantity: isNaN(qty) ? 0 : qty }
+          : item
+      )
     );
-    resetForm();
-    fetchProducts(); // โหลดสินค้าใหม่เพื่ออัปเดต stock ที่แสดงผล
-    setSelling(false);
+  }
+
+  function clearCart() {
+    setCart([]);
+  }
+
+  // ยืนยันการขายทั้งตะกร้า
+  async function handleCheckout() {
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (cart.length === 0) {
+      setErrorMsg('ยังไม่มีสินค้าในตะกร้า');
+      return;
+    }
+    if (cart.some((item) => !item.quantity || item.quantity <= 0)) {
+      setErrorMsg('มีรายการที่จำนวนไม่ถูกต้อง กรุณาตรวจสอบ');
+      return;
+    }
+
+    setCheckingOut(true);
+
+    // ตรวจสอบ stock ล่าสุดของทุกสินค้าในตะกร้าก่อนบันทึกจริง
+    for (const item of cart) {
+      const { data: latestProduct, error: fetchError } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', item.productId)
+        .single();
+
+      if (fetchError || !latestProduct) {
+        setErrorMsg(`ไม่พบข้อมูลสินค้า "${item.name}" กรุณาลองใหม่`);
+        setCheckingOut(false);
+        return;
+      }
+      if (latestProduct.stock < item.quantity) {
+        setErrorMsg(
+          `สินค้า "${item.name}" คงเหลือไม่พอ (คงเหลือ ${latestProduct.stock} ${latestProduct.unit})`
+        );
+        setCheckingOut(false);
+        return;
+      }
+    }
+
+    // บันทึกทีละรายการ: insert ลง sales + update stock ใน products
+    for (const item of cart) {
+      const total = item.price * item.quantity;
+
+      const { error: saleError } = await supabase.from('sales').insert([
+        {
+          product_id: item.productId,
+          product_name: item.name,
+          quantity: item.quantity,
+          total_price: total,
+          sold_at: new Date().toISOString(),
+        },
+      ]);
+
+      if (saleError) {
+        setErrorMsg(`บันทึกการขาย "${item.name}" ไม่สำเร็จ: ${saleError.message}`);
+        setCheckingOut(false);
+        fetchProducts();
+        return;
+      }
+
+      // ลด stock ตามจำนวนที่ขาย (คำนวณจาก stock ปัจจุบันใน products)
+      const { data: currentProduct } = await supabase
+        .from('products')
+        .select('stock')
+        .eq('id', item.productId)
+        .single();
+
+      const newStock = (currentProduct?.stock ?? item.stock) - item.quantity;
+
+      const { error: updateError } = await supabase
+        .from('products')
+        .update({ stock: newStock })
+        .eq('id', item.productId);
+
+      if (updateError) {
+        setErrorMsg(`อัปเดตสต็อก "${item.name}" ไม่สำเร็จ: ${updateError.message}`);
+        setCheckingOut(false);
+        fetchProducts();
+        return;
+      }
+    }
+
+    setSuccessMsg(
+      `ขายสำเร็จ ${cart.length} รายการ รวม ${cartTotal.toFixed(2)} บาท`
+    );
+    clearCart();
+    fetchProducts();
+    setCheckingOut(false);
   }
 
   return (
     <div>
       <h1>ขายสินค้า</h1>
 
+      {/* ยอดรวมตัวใหญ่ ไว้บนสุด เห็นชัดทั้งฝั่งผู้ขายและลูกค้า */}
+      <div className="total-banner">
+        <div className="total-banner-label">ยอดรวมทั้งหมด</div>
+        <div className="total-banner-amount">{cartTotal.toFixed(2)} บาท</div>
+      </div>
+
       {errorMsg && <p className="error-text">{errorMsg}</p>}
       {successMsg && <p className="success-text">{successMsg}</p>}
 
+      {/* ฟอร์มเพิ่มสินค้าลงตะกร้า */}
       <div className="card">
+        <h2>เพิ่มสินค้า</h2>
         {loading ? (
           <p>กำลังโหลดข้อมูลสินค้า...</p>
         ) : (
-          <form onSubmit={handleSell}>
+          <form onSubmit={handleAddToCart}>
             <div className="form-row">
-              {/* Dropdown เลือกสินค้า */}
               <select
                 value={selectedProductId}
                 onChange={(e) => setSelectedProductId(e.target.value)}
@@ -157,27 +248,82 @@ export default function SellPage() {
                 ))}
               </select>
 
-              {/* ช่องกรอกจำนวน */}
               <input
                 type="number"
                 placeholder="จำนวน"
                 min="1"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
+                className="qty-input"
+                value={addQuantity}
+                onChange={(e) => setAddQuantity(e.target.value)}
               />
-            </div>
 
-            {/* แสดงยอดรวมอัตโนมัติ */}
-            <div className="form-row">
-              <p>
-                <strong>ยอดรวม: {totalPrice.toFixed(2)} บาท</strong>
-              </p>
+              <button type="submit">+ เพิ่มลงตะกร้า</button>
             </div>
-
-            <button type="submit" disabled={selling}>
-              {selling ? 'กำลังบันทึก...' : 'ขาย'}
-            </button>
           </form>
+        )}
+      </div>
+
+      {/* ตะกร้าสินค้า */}
+      <div className="card">
+        <h2>รายการที่จะขาย</h2>
+
+        {cart.length === 0 ? (
+          <p>ยังไม่มีสินค้าในตะกร้า</p>
+        ) : (
+          <>
+            <table>
+              <thead>
+                <tr>
+                  <th>ชื่อสินค้า</th>
+                  <th>ราคา/หน่วย</th>
+                  <th>จำนวน</th>
+                  <th>รวม</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {cart.map((item) => (
+                  <tr key={item.productId}>
+                    <td>{item.name}</td>
+                    <td>{item.price} บาท/{item.unit}</td>
+                    <td>
+                      <input
+                        type="number"
+                        min="1"
+                        className="qty-input"
+                        value={item.quantity}
+                        onChange={(e) =>
+                          handleChangeCartQuantity(item.productId, e.target.value)
+                        }
+                      />
+                    </td>
+                    <td>{(item.price * item.quantity).toFixed(2)} บาท</td>
+                    <td>
+                      <button
+                        className="remove-btn"
+                        onClick={() => handleRemoveFromCart(item.productId)}
+                      >
+                        ลบ
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="checkout-row">
+              <button className="clear-btn" onClick={clearCart} disabled={checkingOut}>
+                ล้างตะกร้า
+              </button>
+              <button
+                className="checkout-btn"
+                onClick={handleCheckout}
+                disabled={checkingOut}
+              >
+                {checkingOut ? 'กำลังบันทึกการขาย...' : `ยืนยันการขาย (${cartTotal.toFixed(2)} บาท)`}
+              </button>
+            </div>
+          </>
         )}
       </div>
     </div>
