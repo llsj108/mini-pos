@@ -128,3 +128,65 @@ input, select {
   color: #16a34a;
   font-size: 14px;
 }
+
+
+/* ป้ายยอดรวมตัวใหญ่ สำหรับหน้าขายสินค้า */
+.total-banner {
+  background-color: #111827;
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 20px;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.total-banner-label {
+  font-size: 14px;
+  opacity: 0.8;
+  margin-bottom: 4px;
+}
+
+.total-banner-amount {
+  font-size: 42px;
+  font-weight: 800;
+  color: #4ade80;
+}
+
+.qty-input {
+  width: 80px;
+}
+
+.checkout-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.checkout-btn {
+  background-color: #16a34a;
+  font-size: 16px;
+  padding: 12px 20px;
+}
+
+.checkout-btn:hover {
+  background-color: #15803d;
+}
+
+.clear-btn {
+  background-color: #6b7280;
+}
+
+.clear-btn:hover {
+  background-color: #4b5563;
+}
+
+.remove-btn {
+  background-color: #dc2626;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.remove-btn:hover {
+  background-color: #b91c1c;
+}
